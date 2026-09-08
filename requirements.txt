@@ -1,0 +1,32 @@
+# --- Ядро обработки аудио ---
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12
+pandas>=2.0
+openpyxl>=3.1
+requests>=2.31
+
+# --- VAD (Silero) ---
+torch>=2.0
+torchaudio
+
+# --- Поиск и разметка (Whisper) ---
+openai-whisper>=20231117
+numba
+
+# --- Диаризация (pyannote) ---
+pyannote.audio>=3.3
+
+# --- Опционально: drag-and-drop файлов в окно ---
+# tkinterdnd2
+
+# --- Опционально: прослушивание аудио прямо из приложения ---
+# simpleaudio  (без него файлы открываются системным плеером)
+
+# --- Опционально: локальный TTS OmniVoice ---
+# omnivoice  (модель k2-fsa/OmniVoice с Hugging Face)
+
+# --- Опционально: изменение скорости без сдвига тона ---
+# pyrubberband  (требует установленный rubberband-cli в системе)
+# --- Опционально: изменение высоты тона ---
+# praat-parselmouth

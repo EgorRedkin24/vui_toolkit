@@ -1,0 +1,101 @@
+{
+  "theme": "dark",
+  "processing": {
+    "mode": "pipeline",
+    "preset": "★ 8K",
+    "silence_start": true,
+    "silence_start_dur": "0.4",
+    "silence_end": true,
+    "silence_end_dur": "0.4",
+    "keep_names": false,
+    "format": "WAV",
+    "subtype": "PCM_16",
+    "source_mode": "file",
+    "output_dir": "C:/Users/redki/Desktop/ToolKit ТЕСТЫ"
+  },
+  "vad": {
+    "mode": "speech",
+    "min_dur": "1",
+    "max_dur": "4",
+    "threshold": "0.7",
+    "table_format": "xlsx",
+    "source_mode": "file",
+    "output_dir": ""
+  },
+  "tts": {
+    "engine": "ElevenLabs (API)",
+    "api_key": "",
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "",
+    "ref_audio": "",
+    "source_mode": "phrase",
+    "output_dir": ""
+  },
+  "search": {
+    "max_fragments": "2",
+    "model": "medium",
+    "language": "ru",
+    "fuzzy": false,
+    "similarity": "80",
+    "source_mode": "folder",
+    "words": [
+      "абонент",
+      "занят"
+    ]
+  },
+  "diarization": {
+    "hf_token": "",
+    "use_source_dir": true,
+    "output_dir": "",
+    "source_mode": "file"
+  },
+  "merge": {
+    "pause": "0.6",
+    "sr": "как у первого файла",
+    "filename": "dilnoza_sample",
+    "format": "WAV",
+    "subtype": "PCM_16",
+    "output_dir": "C:/Users/redki/Desktop/ToolKit ТЕСТЫ"
+  },
+  "metadata": {
+    "table_path": "C:/Users/redki/Desktop/ToolKit ТЕСТЫ/Реплики_Майя.xlsx",
+    "audio_dir": "C:/Users/redki/Desktop/ToolKit ТЕСТЫ/Аудио_Майя",
+    "output_audio_dir": "C:/Users/redki/Desktop/ToolKit ТЕСТЫ/мета",
+    "output_path": "C:/Users/redki/Desktop/ToolKit ТЕСТЫ/мета/meta.txt",
+    "text_col": "text",
+    "filename_col": "filename",
+    "intent_col": "intent",
+    "voice_enabled": true,
+    "voice_line": "- voice_id_2101: # Maya",
+    "voice_indent": "2",
+    "intents_enabled": true,
+    "intent_template": "- {intent}:",
+    "intent_indent": "6",
+    "record_template": "- { filename: 's3://{{ db_va_data_s3_bucket }}/{filename}', transcription: '{text}', duration_s: {duration_s} }",
+    "record_indent": "12",
+    "parts_template": "- parts:",
+    "parts_indent": "12",
+    "parts_content_indent": "16",
+    "number_enabled": false,
+    "number_start": "1",
+    "preview_rows": "2",
+    "variables": [
+      {
+        "marker": "cn",
+        "seg_label": "абонент",
+        "placeholder": "{subscriber_name}",
+        "name": "subscriber_name",
+        "template": "- { part_type: \"{name}\" }",
+        "indent": 16
+      },
+      {
+        "marker": "cr",
+        "seg_label": "занят",
+        "placeholder": "{subscriber_reason}",
+        "name": "subscriber_reason",
+        "template": "- { part_type: \"{name}\" }",
+        "indent": 16
+      }
+    ]
+  }
+}

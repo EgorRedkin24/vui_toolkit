@@ -1,0 +1,10 @@
+{
+  "8K": [
+    {
+      "effect": "resample",
+      "params": {
+        "new_sr": 8000
+      }
+    }
+  ]
+}
