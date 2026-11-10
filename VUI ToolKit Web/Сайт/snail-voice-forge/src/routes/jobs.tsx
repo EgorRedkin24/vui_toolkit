@@ -1,0 +1,17 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ExternalLink, History, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { getJob, HISTORY_KEY } from "@/lib/vui-api";
+import type { HistoryJob } from "@/lib/vui-types";
+import { getTool } from "@/lib/tools";
+
+export const Route = createFileRoute("/jobs")({ head: () => ({ meta: [{ title: "История задач — VUI ToolKit" }, { name: "description", content: "Сессионная история обработки аудио" }, { property: "og:title", content: "История задач — VUI ToolKit" }, { property: "og:description", content: "Сессионная история обработки аудио" }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: JobsPage });
+
+function JobsPage() {
+  const [jobs, setJobs] = useState<HistoryJob[]>([]);
+  useEffect(() => setJobs(JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "[]") as HistoryJob[]), []);
+  const refresh = async () => { const next = await Promise.all(jobs.map(async (item) => { try { const job = await getJob(item.id); return { ...item, status: job.status } as HistoryJob; } catch { return { ...item, status: "missing" } as HistoryJob; } })); setJobs(next); window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); toast.success("Статусы обновлены"); };
+  return <div><div className="mb-8 flex flex-wrap items-end justify-between gap-4"><div><div className="mb-3 flex items-center gap-2 font-mono text-xs uppercase text-primary"><History className="h-4 w-4" />Сессия</div><h1 className="text-3xl font-semibold">История задач</h1><p className="mt-2 text-sm text-muted-foreground">Ссылки сохраняются в этом браузере, пока сервер хранит результаты.</p></div><Button variant="outline" onClick={() => void refresh()} disabled={!jobs.length}><RefreshCw />Обновить статусы</Button></div>{!jobs.length ? <div className="surface-panel rounded-lg p-10 text-center"><p className="font-medium">История пока пуста</p><p className="mt-2 text-sm text-muted-foreground">Запущенные задачи появятся здесь.</p></div> : <div className="overflow-x-auto rounded-lg border border-border"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-4 py-3 font-medium">Задача</th><th className="px-4 py-3 font-medium">Инструмент</th><th className="px-4 py-3 font-medium">Время</th><th className="px-4 py-3 font-medium">Статус</th><th className="px-4 py-3" /></tr></thead><tbody>{jobs.map((job) => <tr key={job.id} className="border-t border-border bg-card"><td className="px-4 py-4 font-mono text-xs">{job.id}</td><td className="px-4 py-4">{getTool(job.tool)?.title || job.tool}</td><td className="px-4 py-4 text-muted-foreground">{new Date(job.createdAt).toLocaleString("ru-RU")}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${job.status === "done" ? "bg-success/10 text-success" : job.status === "missing" || job.status === "error" ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"}`}>{job.status === "missing" ? "результаты удалены" : job.status}</span></td><td className="px-4 py-4 text-right">{job.status !== "missing" && getTool(job.tool) && <Button asChild variant="ghost" size="sm"><Link to="/tools/$toolId" params={{ toolId: job.tool }}><ExternalLink />Открыть</Link></Button>}</td></tr>)}</tbody></table></div>}</div>;
+}

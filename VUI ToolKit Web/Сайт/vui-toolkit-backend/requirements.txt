@@ -1,0 +1,25 @@
+# --- Сервер ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# --- Ядро обработки аудио ---
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12
+pandas>=2.0
+openpyxl>=3.1
+requests>=2.31
+
+# --- Тяжёлые ML-зависимости (нужны для VAD, поиска, диаризации, OmniVoice) ---
+# Раскомментируйте при установке на машине, где эти функции нужны.
+# Установка: pip install -r requirements.txt и затем нужные строки ниже.
+
+# torch>=2.0
+# torchaudio
+# openai-whisper>=20231117   # поиск слов и разметка (.seg)
+# numba
+# pyannote.audio>=3.3        # диаризация (нужен HF-токен)
+# omnivoice                  # локальный TTS с клонированием голоса
+# pyrubberband               # изменение скорости без сдвига тона (нужен rubberband-cli)
+# praat-parselmouth          # изменение высоты тона
