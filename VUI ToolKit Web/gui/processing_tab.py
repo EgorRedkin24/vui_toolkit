@@ -8,9 +8,10 @@ import os
 import tempfile
 import threading
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from core.audio_io import (SAVE_FORMATS, DEFAULT_FORMAT, DEFAULT_SUBTYPE,
+from core import ambience
+from core.audio_io import (AUDIO_EXTENSIONS, SAVE_FORMATS, DEFAULT_FORMAT, DEFAULT_SUBTYPE,
                            load_audio, save_audio, get_output_path,
                            unique_path)
 from core.effects import EFFECTS, PRESETS, apply_pipeline
@@ -21,6 +22,13 @@ from gui.widgets import (AudioSourceSelector, DirectorySelector, LogPanel,
                          ResultsPanel, RunBar)
 
 _USER_PREFIX = "★ "  # пометка пользовательских пресетов в списке
+_NO_AMBIENCE = "— без фона —"
+_NO_PRESET = "— без пресета —"   # только конвертация / смена частоты
+_PRESET_WAV8K = "WAV 8k 16bit"   # без обработки; ставит WAV, 16 бит, 8000 Гц
+_CONVERT_ONLY = (_NO_PRESET, _PRESET_WAV8K)
+_ORIGINAL_SR = "как в оригинале"
+_SAMPLE_RATES = [_ORIGINAL_SR, "8000", "11025", "16000", "22050", "24000",
+                 "44100", "48000"]
 
 
 class ProcessingTab(ttk.Frame):
@@ -103,12 +111,20 @@ class ProcessingTab(ttk.Frame):
         self.subtype_combo.grid(row=0, column=3, sticky="w", padx=(4, 0))
         self._on_format_change()
 
+        ttk.Label(save_frame, text="Частота, Гц:").grid(row=0, column=4,
+                                                        sticky="w",
+                                                        padx=(14, 0))
+        self.sr_var = tk.StringVar(value=_ORIGINAL_SR)
+        ttk.Combobox(save_frame, values=_SAMPLE_RATES,
+                     textvariable=self.sr_var, width=16).grid(
+            row=0, column=5, sticky="w", padx=(4, 0))
+
         self.keep_names_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             save_frame,
             text="Сохранить исходные названия (иначе добавляется "
                  "постфикс «_processed»)",
-            variable=self.keep_names_var).grid(row=1, column=0, columnspan=4,
+            variable=self.keep_names_var).grid(row=1, column=0, columnspan=6,
                                                sticky="w", pady=(6, 0))
 
         self.output_dir = DirectorySelector(self)
@@ -139,6 +155,8 @@ class ProcessingTab(ttk.Frame):
         self.preset_combo = ttk.Combobox(row1, textvariable=self.preset_var,
                                          state="readonly", width=30)
         self.preset_combo.pack(side="left", padx=8)
+        self.preset_combo.bind("<<ComboboxSelected>>",
+                               self._on_preset_selected)
         self._refresh_preset_list()
 
         row2 = ttk.Frame(self.preset_frame)
@@ -150,9 +168,54 @@ class ProcessingTab(ttk.Frame):
         ttk.Label(row2, text="★ — пользовательские пресеты",
                   foreground="#666666").pack(side="left", padx=10)
 
+        # Ambience: выбор из библиотеки и загрузка новой дорожки
+        row3 = ttk.Frame(self.preset_frame)
+        row3.pack(fill="x", pady=(8, 0))
+        ttk.Label(row3, text="Ambience:").pack(side="left")
+        self.ambience_var = tk.StringVar(value=_NO_AMBIENCE)
+        self.ambience_combo = ttk.Combobox(
+            row3, textvariable=self.ambience_var, state="readonly", width=30)
+        self.ambience_combo.pack(side="left", padx=8)
+        ttk.Button(row3, text="Загрузить дорожку...",
+                   command=self._import_ambience).pack(side="left")
+        ttk.Label(row3, text="Уровень, дБ:").pack(side="left", padx=(14, 0))
+        self.ambience_gain = tk.StringVar(value="-20")
+        ttk.Entry(row3, textvariable=self.ambience_gain, width=6).pack(
+            side="left", padx=4)
+        ttk.Label(
+            self.preset_frame,
+            text="Фон подмешивается последним шагом, уровень — относительно "
+                 "громкости речи (RMS). Дорожки хранятся в папке ambience/.",
+            foreground="#666666").pack(anchor="w", pady=(4, 0))
+        self._refresh_ambience_list()
+
+    def _refresh_ambience_list(self, select: str = None):
+        values = [_NO_AMBIENCE] + ambience.list_tracks()
+        self.ambience_combo.config(values=values)
+        current = select or self.ambience_var.get()
+        self.ambience_var.set(current if current in values else _NO_AMBIENCE)
+
+    def _import_ambience(self):
+        path = filedialog.askopenfilename(
+            title="Выберите дорожку ambience",
+            filetypes=[("Аудиофайлы",
+                        " ".join(f"*{e}" for e in AUDIO_EXTENSIONS)),
+                       ("Все файлы", "*.*")])
+        if not path:
+            return
+        try:
+            name = ambience.import_track(path)
+        except Exception as e:
+            messagebox.showerror("Ошибка",
+                                 f"Не удалось загрузить дорожку: {e}")
+            return
+        self._refresh_ambience_list(select=name)
+        self.log_panel.log(f"Дорожка ambience добавлена: {name}")
+
     def _all_presets(self) -> dict:
         """Все пресеты: встроенные + пользовательские (с пометкой ★)."""
-        result = {name: steps for name, steps in PRESETS.items()}
+        result = {_NO_PRESET: [], _PRESET_WAV8K: []}
+        result.update({name: steps for name, steps in PRESETS.items()})
         for name, steps in load_user_presets().items():
             result[_USER_PREFIX + name] = steps
         return result
@@ -163,8 +226,10 @@ class ProcessingTab(ttk.Frame):
         self.preset_combo.config(values=values)
         if current in values:
             self.preset_var.set(current)
-        elif values:
-            self.preset_var.set(values[0])
+        elif values:   # по умолчанию — первый реальный пресет
+            self.preset_var.set(values[len(_CONVERT_ONLY)]
+                                if len(values) > len(_CONVERT_ONLY)
+                                else values[0])
 
     def _edit_preset(self):
         """Загружает выбранный пресет в конструктор пайплайна."""
@@ -303,6 +368,17 @@ class ProcessingTab(ttk.Frame):
             self.subtype_var.set("")
             self.subtype_combo.config(state="disabled")
 
+    def _on_preset_selected(self, event=None):
+        if self.preset_var.get() == _PRESET_WAV8K:
+            self._set_wav_8k()
+
+    def _set_wav_8k(self):
+        """Настройки сохранения для пресета «WAV 8k 16bit»."""
+        self.format_var.set("WAV")
+        self._on_format_change()
+        self.subtype_var.set("PCM_16")
+        self.sr_var.set("8000")
+
     def _on_silence_toggle(self):
         self.silence_start_entry.config(
             state="normal" if self.silence_start_var.get() else "disabled")
@@ -440,7 +516,41 @@ class ProcessingTab(ttk.Frame):
             steps.append({"effect": "add_silence_end",
                           "params": {"duration": dur}})
 
-        if not steps:
+        if self.mode.get() == "preset" and                 self.ambience_var.get() != _NO_AMBIENCE:
+            name = self.ambience_var.get()
+            path = ambience.track_path(name)
+            if not os.path.isfile(path):
+                messagebox.showerror("Ошибка",
+                                     f"Дорожка ambience не найдена: {name}")
+                return None, None
+            try:
+                gain = float(self.ambience_gain.get().replace(",", "."))
+            except ValueError:
+                messagebox.showerror("Ошибка",
+                                     "Уровень ambience — число (дБ)")
+                return None, None
+            steps.append({"effect": "mix_ambience",
+                          "params": {"path": path, "gain_db": gain}})
+            description += f" + ambience «{name}»"
+
+        sr_text = self.sr_var.get().strip()
+        if sr_text and sr_text != _ORIGINAL_SR:
+            try:
+                new_sr = int(sr_text)
+                if new_sr < 1000:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Ошибка", "Частота дискретизации — целое число Гц "
+                              "(например, 8000) или «как в оригинале»")
+                return None, None
+            steps.append({"effect": "resample",
+                          "params": {"new_sr": new_sr}})
+            description += f", {new_sr} Гц"
+
+        convert_only = (self.mode.get() == "preset"
+                        and self.preset_var.get() in _CONVERT_ONLY)
+        if not steps and not convert_only:
             messagebox.showerror(
                 "Ошибка",
                 "Пайплайн пуст. Добавьте эффекты или включите "
@@ -576,6 +686,8 @@ class ProcessingTab(ttk.Frame):
         return {
             "mode": self.mode.get(),
             "preset": self.preset_var.get(),
+            "ambience": self.ambience_var.get(),
+            "ambience_gain": self.ambience_gain.get(),
             "silence_start": self.silence_start_var.get(),
             "silence_start_dur": self.silence_start_dur.get(),
             "silence_end": self.silence_end_var.get(),
@@ -583,6 +695,7 @@ class ProcessingTab(ttk.Frame):
             "keep_names": self.keep_names_var.get(),
             "format": self.format_var.get(),
             "subtype": self.subtype_var.get(),
+            "sample_rate": self.sr_var.get(),
             "source_mode": self.source.get_mode(),
             "output_dir": self.output_dir.get(),
         }
@@ -597,6 +710,8 @@ class ProcessingTab(ttk.Frame):
             values = self.preset_combo["values"]
             if s["preset"] in values:
                 self.preset_var.set(s["preset"])
+        self._refresh_ambience_list(select=s.get("ambience"))
+        self.ambience_gain.set(s.get("ambience_gain", "-20"))
         self.silence_start_var.set(s.get("silence_start", False))
         self.silence_end_var.set(s.get("silence_end", False))
         self.silence_start_dur.set(s.get("silence_start_dur", "0.2"))
@@ -610,6 +725,7 @@ class ProcessingTab(ttk.Frame):
             values = self.subtype_combo["values"]
             if s["subtype"] in values:
                 self.subtype_var.set(s["subtype"])
+        self.sr_var.set(s.get("sample_rate", _ORIGINAL_SR))
         self.source.set_mode(s.get("source_mode", "file"))
         if s.get("output_dir"):
             self.output_dir.set(s["output_dir"])

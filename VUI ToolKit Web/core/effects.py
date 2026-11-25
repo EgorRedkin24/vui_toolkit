@@ -226,6 +226,43 @@ def stereo_to_mono(signal: np.ndarray, sr: int):
     return signal, sr
 
 
+def mix_ambience(signal: np.ndarray, sr: int, path: str,
+                 gain_db: float = -20.0):
+    """
+    Подмешивает фоновую дорожку (ambience) под сигнал.
+    Дорожка приводится к частоте sr, сводится в моно, зацикливается или
+    обрезается под длину записи (со случайной точкой старта). gain_db —
+    уровень фона относительно RMS сигнала, дБ (например, -20).
+    """
+    from core.audio_io import load_audio
+    if signal.size == 0:
+        return signal, sr
+    amb, amb_sr = load_audio(path)
+    if amb.ndim == 2:
+        amb = amb.mean(axis=1)
+    amb, _ = resample(amb, amb_sr, sr)
+    if amb.size == 0:
+        raise ValueError(f"Пустая дорожка ambience: {path}")
+    n = len(signal)
+    if len(amb) < n:
+        amb = np.tile(amb, n // len(amb) + 2)
+    start = np.random.randint(0, len(amb) - n + 1)
+    amb = amb[start:start + n].astype(np.float64)
+
+    mono = signal if signal.ndim == 1 else signal.mean(axis=1)
+    rms_sig = float(np.sqrt(np.mean(np.square(mono, dtype=np.float64))))
+    rms_amb = float(np.sqrt(np.mean(np.square(amb))))
+    if rms_sig == 0 or rms_amb == 0:
+        return signal, sr
+    amb *= rms_sig * (10 ** (float(gain_db) / 20)) / rms_amb
+    out = signal.astype(np.float64) + (amb if signal.ndim == 1
+                                       else amb[:, None])
+    peak = float(np.max(np.abs(out)))
+    if peak > 1.0:
+        out /= peak
+    return out.astype(np.float32), sr
+
+
 # ---------------------------------------------------------------------------
 # Реестр эффектов (для конструктора пайплайна в GUI)
 # ---------------------------------------------------------------------------
@@ -326,6 +363,14 @@ EFFECTS = {
         "func": resample,
         "params": {
             "new_sr": {"type": int, "default": 16000, "label": "Новая частота, Гц"},
+        },
+    },
+    "mix_ambience": {
+        "title": "Подмешать ambience (фоновая дорожка)",
+        "func": mix_ambience,
+        "params": {
+            "path": {"type": str, "default": "", "label": "Путь к дорожке"},
+            "gain_db": {"type": float, "default": -20.0, "label": "Уровень фона, дБ (от RMS)"},
         },
     },
     "stereo_to_mono": {

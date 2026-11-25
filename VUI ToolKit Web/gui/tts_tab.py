@@ -2,9 +2,13 @@
 Вкладка «TTS»: синтез речи двумя движками —
 ElevenLabs (облачный API) и OmniVoice (локальная модель клонирования голоса).
 
-Два режима: одна фраза или таблица фраз (столбец 'text'; необязательный
-столбец 'voice' — для ElevenLabs это voice_id, для OmniVoice — путь
-к эталонной записи голоса).
+Два режима: одна фраза или таблица фраз. ElevenLabs: столбец с репликами
+выбирается из списка столбцов загруженного файла; 'name' — имя файла,
+'voice' — voice_id. OmniVoice: столбец 'text'; 'voice' — путь к эталонной
+записи голоса.
+
+Кнопка «Пауза» приостанавливает озвучку ElevenLabs после текущей фразы;
+при ошибках доступа (401/402/403/429/439) пауза включается автоматически.
 """
 
 import os
@@ -24,6 +28,7 @@ class TtsTab(ttk.Frame):
         super().__init__(parent, padding=10)
         self.root = root
         self._table_df = None
+        self.pause_ctl = tts_elevenlabs.PauseControl(self._on_pause_change)
         self._build_ui()
 
     # ------------------------------------------------------------------ UI
@@ -62,10 +67,20 @@ class TtsTab(ttk.Frame):
         self.voice_id = tk.StringVar()
         ttk.Entry(self.el_frame, textvariable=self.voice_id, width=45).grid(
             row=1, column=1, sticky="w", padx=4, pady=(6, 0))
+        ttk.Label(self.el_frame, text="ID словаря произношений:").grid(
+            row=2, column=0, sticky="w", pady=(6, 0))
+        self.dictionary_id = tk.StringVar()
+        ttk.Entry(self.el_frame, textvariable=self.dictionary_id,
+                  width=45).grid(row=2, column=1, sticky="w", padx=4,
+                                 pady=(6, 0))
+        ttk.Label(self.el_frame,
+                  text="необязательно; версия подтягивается автоматически",
+                  foreground="#666666").grid(row=2, column=2, columnspan=2,
+                                             sticky="w", pady=(6, 0))
         ttk.Label(
             self.el_frame,
             text="Ключ сохраняется в настройках в открытом виде.",
-            foreground="#666666").grid(row=2, column=0, columnspan=4,
+            foreground="#666666").grid(row=3, column=0, columnspan=4,
                                        sticky="w", pady=(6, 0))
 
         # --- OmniVoice ---
@@ -113,8 +128,31 @@ class TtsTab(ttk.Frame):
                                     foreground="#666666")
         self.table_info.pack(side="left", padx=8)
 
+        # Выбор поля и диапазона реплик (ElevenLabs)
+        self.select_frame = ttk.Frame(src_frame)
+        ttk.Label(self.select_frame, text="Поле для озвучки:").pack(
+            side="left")
+        self.column_var = tk.StringVar()
+        self.column_combo = ttk.Combobox(
+            self.select_frame, values=[],
+            textvariable=self.column_var, state="readonly", width=26)
+        self.column_combo.pack(side="left", padx=(4, 16))
+        ttk.Label(self.select_frame, text="Реплики с:").pack(side="left")
+        self.range_from = tk.StringVar(value="1")
+        ttk.Entry(self.select_frame, textvariable=self.range_from,
+                  width=7).pack(side="left", padx=(4, 8))
+        ttk.Label(self.select_frame, text="по:").pack(side="left")
+        self.range_to = tk.StringVar()
+        ttk.Entry(self.select_frame, textvariable=self.range_to,
+                  width=7).pack(side="left", padx=(4, 8))
+        ttk.Label(self.select_frame,
+                  text="(пусто = до конца; в конце диапазона — пауза)",
+                  foreground="#666666").pack(side="left")
+        self.select_frame.grid(row=3, column=0, columnspan=2, sticky="ew",
+                               pady=(8, 0))
+
         self.table_hint = ttk.Label(src_frame, text="", foreground="#666666")
-        self.table_hint.grid(row=3, column=0, columnspan=2, sticky="w",
+        self.table_hint.grid(row=4, column=0, columnspan=2, sticky="w",
                              pady=(4, 0))
 
         self.phrase_frame.grid(row=1, column=0, columnspan=2, sticky="ew",
@@ -129,6 +167,10 @@ class TtsTab(ttk.Frame):
 
         self.run_bar = RunBar(self, self.root, "Озвучить", self._start)
         self.run_bar.pack(fill="x", pady=(0, 8))
+        self.pause_btn = ttk.Button(self.run_bar, text="Пауза",
+                                    command=self.pause_ctl.toggle,
+                                    state="disabled")
+        self.pause_btn.pack(side="left", padx=(12, 0))
 
         bottom = ttk.Frame(self)
         bottom.pack(fill="both", expand=True)
@@ -144,12 +186,14 @@ class TtsTab(ttk.Frame):
         if elevenlabs:
             self.ov_frame.pack_forget()
             self.el_frame.pack(fill="x")
+            self._on_mode_change()
             self.table_hint.config(
-                text="Обязательный столбец: 'text'. Для разных голосов — "
-                     "столбец 'voice' с voice_id.")
+                text="Реплики берутся из выбранного столбца. Необязательно: "
+                     "'name' (имя файла), 'voice' (voice_id).")
         else:
             self.el_frame.pack_forget()
             self.ov_frame.pack(fill="x")
+            self._on_mode_change()
             self.table_hint.config(
                 text="Обязательный столбец: 'text'. Для разных голосов — "
                      "столбец 'voice' с путём к эталонной записи голоса.")
@@ -157,10 +201,15 @@ class TtsTab(ttk.Frame):
     def _on_mode_change(self):
         if self.source_mode.get() == "phrase":
             self.table_frame.grid_remove()
+            self.select_frame.grid_remove()
             self.phrase_frame.grid()
         else:
             self.phrase_frame.grid_remove()
             self.table_frame.grid()
+            if self.engine_var.get() == ENGINES[0]:
+                self.select_frame.grid()
+            else:
+                self.select_frame.grid_remove()
 
     def _browse_ref_audio(self):
         path = filedialog.askopenfilename(
@@ -182,16 +231,20 @@ class TtsTab(ttk.Frame):
             messagebox.showerror("Ошибка",
                                  f"Не удалось прочитать таблицу: {e}")
             return
-        if "text" not in df.columns:
-            messagebox.showerror(
-                "Ошибка", "В таблице нет обязательного столбца 'text'")
+        if len(df.columns) == 0:
+            messagebox.showerror("Ошибка", "В таблице нет столбцов")
             return
         self._table_df = df
+        columns = [str(c) for c in df.columns]
+        self.column_combo.config(values=columns)
+        self.column_var.set("text_lat" if "text_lat" in columns
+                            else columns[0])
         self.table_path.set(path)
         has_voice = "voice" in df.columns or "voice_id" in df.columns
         voice_note = (", столбец 'voice' найден" if has_voice else
                       ", столбца 'voice' нет — голос по умолчанию")
-        self.table_info.config(text=f"{len(df)} строк{voice_note}")
+        extra = ", name" if "name" in df.columns else ""
+        self.table_info.config(text=f"{len(df)} строк{voice_note}{extra}")
 
     # ------------------------------------------------------------ запуск
     def _start(self):
@@ -233,24 +286,56 @@ class TtsTab(ttk.Frame):
                 messagebox.showerror("Ошибка", "Загрузите таблицу с фразами")
                 self.run_bar.finish()
                 return
+            needed = self.column_var.get() if elevenlabs else "text"
+            if needed not in self._table_df.columns:
+                messagebox.showerror(
+                    "Ошибка", f"В таблице нет столбца '{needed}'")
+                self.run_bar.finish()
+                return
+            if elevenlabs:
+                try:
+                    start = int(self.range_from.get().strip() or "1")
+                    end_s = self.range_to.get().strip()
+                    end = int(end_s) if end_s else None
+                    if start < 1 or (end is not None and end < start):
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "Ошибка", "Диапазон: целые числа, «с» ≥ 1 и "
+                                  "«по» ≥ «с» (или пусто)")
+                    self.run_bar.finish()
+                    return
 
+        self.pause_ctl.resume()
+        self.pause_btn.config(state="normal" if elevenlabs else "disabled",
+                              text="Пауза")
+        table_opts = {}
+        if elevenlabs and mode == "table":
+            table_opts = {"column": self.column_var.get(),
+                          "range_start": start, "range_end": end}
         threading.Thread(target=self._worker,
                          args=(elevenlabs, mode, out_dir,
-                               self.run_bar.cancel_event),
+                               self.run_bar.cancel_event,
+                               self.dictionary_id.get().strip(), table_opts),
                          daemon=True).start()
 
-    def _worker(self, elevenlabs, mode, out_dir, cancel_event):
+    def _worker(self, elevenlabs, mode, out_dir, cancel_event,
+                dictionary_id="", table_opts=None):
         log = self.log_panel.log
         os.makedirs(out_dir, exist_ok=True)
         progress = self.run_bar.set_progress
         try:
+            locators = None
+            if elevenlabs and dictionary_id:
+                locators = tts_elevenlabs.resolve_dictionary_locators(
+                    dictionary_id, self.api_key.get().strip(), log)
             if elevenlabs:
                 if mode == "phrase":
                     path = tts_elevenlabs.synthesize_single(
                         self.phrase_text.get("1.0", tk.END).strip(),
                         self.voice_id.get().strip(),
                         self.api_key.get().strip(), out_dir,
-                        self.model_id.get(), log)
+                        self.model_id.get(), log, locators)
                     if path:
                         self._add_result(path)
                 else:
@@ -258,7 +343,10 @@ class TtsTab(ttk.Frame):
                         self._table_df, self.voice_id.get().strip(),
                         self.api_key.get().strip(), out_dir,
                         self.model_id.get(), log, progress=progress,
-                        cancel_event=cancel_event)
+                        cancel_event=cancel_event, pause=self.pause_ctl,
+                        dictionary_locators=locators,
+                        on_range_end=self._notify_range_end,
+                        **(table_opts or {}))
                     log(f"Создано файлов: {len(created)}")
                     for p in created:
                         self._add_result(p)
@@ -285,7 +373,26 @@ class TtsTab(ttk.Frame):
     def _add_result(self, path):
         self.root.after(0, lambda p=path: self.results.add_result(p, "аудио"))
 
+    def _notify_range_end(self, range_end, remaining):
+        def _show():
+            self.root.bell()
+            messagebox.showinfo(
+                "Диапазон озвучен",
+                f"Реплики до №{range_end} озвучены. Осталось: {remaining}. "
+                "Озвучка на паузе — нажмите «Продолжить», чтобы озвучить "
+                "остальные, или «Прервать».")
+        self.root.after(0, _show)
+
+    def _on_pause_change(self, paused, reason):
+        def _upd():
+            self.pause_btn.config(text="Продолжить" if paused else "Пауза")
+            if paused and reason != "вручную":
+                self.run_bar.status.config(text=f"Пауза: {reason}")
+        self.root.after(0, _upd)
+
     def _finish(self):
+        self.pause_ctl.resume()
+        self.pause_btn.config(state="disabled", text="Пауза")
         self.run_bar.finish()
         messagebox.showinfo("Готово", "Озвучка завершена")
 
@@ -296,6 +403,7 @@ class TtsTab(ttk.Frame):
             "api_key": self.api_key.get(),
             "model_id": self.model_id.get(),
             "voice_id": self.voice_id.get(),
+            "dictionary_id": self.dictionary_id.get(),
             "ref_audio": self.ref_audio.get(),
             "source_mode": self.source_mode.get(),
             "output_dir": self.output_dir.get(),
@@ -311,6 +419,7 @@ class TtsTab(ttk.Frame):
         if s.get("model_id") in tts_elevenlabs.TTS_MODELS:
             self.model_id.set(s["model_id"])
         self.voice_id.set(s.get("voice_id", ""))
+        self.dictionary_id.set(s.get("dictionary_id", ""))
         self.ref_audio.set(s.get("ref_audio", ""))
         self.source_mode.set(s.get("source_mode", "phrase"))
         self._on_mode_change()
